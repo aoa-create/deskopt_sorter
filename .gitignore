@@ -1,0 +1,6 @@
+*.log
+*.tmp
+*.bak
+__pycache__/
+.pytest_cache/
+_ISLEM_KAYITLARI/

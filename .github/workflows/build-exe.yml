@@ -1,0 +1,123 @@
+name: Build and test Windows EXE
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'Masaustu_Duzenleyici.ps1'
+      - 'tests/**'
+      - '.github/workflows/build-exe.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'Masaustu_Duzenleyici.ps1'
+      - 'tests/**'
+      - '.github/workflows/build-exe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse PowerShell source
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path '.\Masaustu_Duzenleyici.ps1'),
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | Format-List | Out-String | Write-Error
+            exit 1
+          }
+
+      - name: Source smoke test
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass `
+            -File '.\tests\SmokeTest_Masaustu_Duzenleyici.ps1'
+
+      - name: Install PS2EXE
+        shell: powershell
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module ps2exe -Scope CurrentUser -Force -AllowClobber
+          Import-Module ps2exe -Force
+          Get-Command Invoke-PS2EXE
+
+      - name: Build DEBUG and RELEASE executables
+        shell: powershell
+        run: |
+          Import-Module ps2exe -Force
+          New-Item -ItemType Directory -Path '.\dist' -Force | Out-Null
+
+          Invoke-PS2EXE `
+            -InputFile '.\Masaustu_Duzenleyici.ps1' `
+            -OutputFile '.\dist\Masaustu_Duzenleyici_DEBUG.exe' `
+            -x64 -STA `
+            -Title 'Masaüstü Düzenleyici DEBUG' `
+            -Product 'Masaüstü Düzenleyici' `
+            -Company 'aoa-create' `
+            -Version '1.0.0.0'
+
+          Invoke-PS2EXE `
+            -InputFile '.\Masaustu_Duzenleyici.ps1' `
+            -OutputFile '.\dist\Masaustu_Duzenleyici.exe' `
+            -x64 -STA -noConsole `
+            -Title 'Masaüstü Düzenleyici' `
+            -Product 'Masaüstü Düzenleyici' `
+            -Company 'aoa-create' `
+            -Version '1.0.0.0'
+
+      - name: Validate PE executables
+        shell: powershell
+        run: |
+          $executables = @(
+            '.\dist\Masaustu_Duzenleyici_DEBUG.exe',
+            '.\dist\Masaustu_Duzenleyici.exe'
+          )
+          foreach ($file in $executables) {
+            if (-not (Test-Path -LiteralPath $file)) {
+              throw "EXE oluşturulmadı: $file"
+            }
+            $bytes = [IO.File]::ReadAllBytes((Resolve-Path $file))
+            if ($bytes.Length -lt 2 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
+              throw "Geçersiz Windows PE imzası: $file"
+            }
+          }
+
+      - name: Compiled DEBUG EXE smoke test
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass `
+            -File '.\tests\SmokeTest_Masaustu_Duzenleyici.ps1' `
+            -ExePath (Resolve-Path '.\dist\Masaustu_Duzenleyici_DEBUG.exe')
+
+      - name: Create SHA-256 checksums
+        shell: powershell
+        run: |
+          Get-FileHash '.\dist\*.exe' -Algorithm SHA256 |
+            ForEach-Object {
+              "$($_.Hash)  $([IO.Path]::GetFileName($_.Path))"
+            } |
+            Set-Content '.\dist\SHA256SUMS.txt' -Encoding ASCII
+          Copy-Item '.\Masaustu_Duzenleyici.ps1' '.\dist\Masaustu_Duzenleyici.ps1'
+          Copy-Item '.\README.md' '.\dist\README.md'
+
+      - name: Upload tested Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Masaustu-Duzenleyici-Windows-x64
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30

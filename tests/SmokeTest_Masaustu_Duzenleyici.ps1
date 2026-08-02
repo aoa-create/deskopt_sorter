@@ -1,12 +1,18 @@
 #requires -version 5.1
 [CmdletBinding()]
 param(
-    [string]$ScriptPath = (Join-Path $PSScriptRoot '..\Masaustu_Duzenleyici.ps1'),
+    [string]$ScriptPath = '',
     [string]$ExePath = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrWhiteSpace($ScriptPath)) {
+    $testDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $ScriptPath = Join-Path $testDirectory '..\Masaustu_Duzenleyici.ps1'
+}
+$ScriptPath = [IO.Path]::GetFullPath($ScriptPath)
 
 function Assert-True {
     param([bool]$Condition, [string]$Message)
@@ -33,7 +39,7 @@ try {
     function Invoke-Organizer {
         param([string]$RunMode)
 
-        $args = @(
+        $arguments = @(
             '-Mode', $RunMode,
             '-SourceRoot', $source,
             '-DestinationRoot', $destination,
@@ -41,13 +47,13 @@ try {
         )
 
         if ([string]::IsNullOrWhiteSpace($ExePath)) {
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner @args | Out-Null
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner @arguments | Out-Null
         }
         else {
-            & $runner @args | Out-Null
+            & $runner @arguments | Out-Null
         }
 
-        if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+        if ($LASTEXITCODE -ne 0) {
             throw "Organizer exit code: $LASTEXITCODE ($RunMode)"
         }
     }
